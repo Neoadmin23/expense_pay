@@ -1,0 +1,49 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-08-12 22:53:43.344746",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "expenses_entry",
+  "row_idx",
+  "log_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "entry_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Expenses Entry"
+  },
+  {
+   "fieldname": "row_idx",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Row Index",
+   "read_only": 1
+  },
+  {
+   "fieldname": "log_message",
+   "fieldtype": "Text",
+   "in_list_view": 1,
+   "label": "Log Message",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-08-12 22:58:14.605424",
+ "modified_by": "erpsupport@irsaa.com",
+ "module": "Expense Pay",
+ "name": "Update Log Detail",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

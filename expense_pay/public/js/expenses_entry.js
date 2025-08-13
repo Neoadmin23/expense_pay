@@ -1,10 +1,9 @@
-// Copyright (c) 2023, Kishan Panchal and contributors
-// For license information, please see license.txt
-
 frappe.ui.form.on("Expenses Entry", {
   refresh: function (frm) {
     frm.events.show_general_ledger(frm);
+    // Add custom button to update cost centers for this Expenses Entry
   },
+
   show_general_ledger: function (frm) {
     if (frm.doc.docstatus > 0) {
       frm.add_custom_button(
@@ -24,6 +23,7 @@ frappe.ui.form.on("Expenses Entry", {
       );
     }
   },
+
   onload: function (frm) {
     frm.fields_dict["account_paid_from"].get_query = function (doc) {
       return {
@@ -33,6 +33,7 @@ frappe.ui.form.on("Expenses Entry", {
       };
     };
   },
+
   before_save: function (frm) {
     console.log("paid amount", frm.doc.paid_amount);
     console.log("total debit", frm.doc.total_debit);
@@ -55,7 +56,6 @@ frappe.ui.form.on("Expenses", {
       frm.doc.expenses.forEach(function (d) {
         totalAmount += d.amount;
       });
-
       resolve(totalAmount);
     });
 
@@ -63,6 +63,7 @@ frappe.ui.form.on("Expenses", {
       frm.set_value("total_debit", totalAmount);
     });
   },
+
   onload: function (frm) {
     frm.fields_dict["expenses"].grid.get_field("account_paid_to").get_query =
       function (doc, cdt, cdn) {
@@ -73,15 +74,14 @@ frappe.ui.form.on("Expenses", {
         };
       };
   },
+
   amount: function (frm, cdt, cdn) {
     let d = locals[cdt][cdn];
-    // sum all the amounts from the expenses table and set it to the total_debit field
     let totalAmountPromise = new Promise(function (resolve, reject) {
       let totalAmount = 0;
       frm.doc.expenses.forEach(function (d) {
         totalAmount += d.amount;
       });
-
       resolve(totalAmount);
     });
 
@@ -89,6 +89,7 @@ frappe.ui.form.on("Expenses", {
       frm.set_value("total_debit", totalAmount);
     });
   },
+
   account_paid_to: function (frm, cdt, cdn) {
     let d = locals[cdt][cdn];
     if (d.account_paid_to) {

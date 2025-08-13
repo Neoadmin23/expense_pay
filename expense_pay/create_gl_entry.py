@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import  now, logger
+from frappe.utils import now, logger
 from erpnext.accounts.utils import _delete_gl_entries
 
 logger.set_log_level("DEBUG")
@@ -25,7 +25,7 @@ def create_gl_entries(doc, method):
         "doctype": "GL Entry",
         "posting_date": doc.posting_date,
         "account": doc.account_paid_from,
-        "cost_center": doc.default_cost_center or "",
+        "cost_center": doc.default_cost_center,
         "debit": 0,
         "credit": doc.paid_amount,
         "debit_in_account_currency": 0,
@@ -72,7 +72,8 @@ def create_gl_entries(doc, method):
             vat_template = frappe.get_doc("Purchase Taxes and Charges Template", expense.vat_template)
             if vat_template and vat_template.taxes:
                 vat_account = vat_template.taxes[0].account_head
-                vat_cost_center = vat_template.taxes[0].cost_center
+                vat_cost_center = expense.cost_center or doc.default_cost_center  # Use expense.cost_center or fallback to default_cost_center
+                logger.info(f"Using cost_center {vat_cost_center} for VAT entry instead of template cost center {vat_template.taxes[0].cost_center}")
 
                 vat_gl_entry = {
                     "doctype": "GL Entry",
@@ -106,12 +107,10 @@ def create_gl_entries(doc, method):
         except Exception as e:
             logger.error(f"Error submitting GL Entry for Doc {doc.name}: {e}")
             frappe.msgprint(f"Error submitting GL Entry for {doc.name}: {str(e)}", alert=True, indicator="red")
-            return  # Stop the function if an error occurs
+            return
 
     logger.info(f"GL Entry created for Doc: {doc.name} using create_gl_entries")
     frappe.msgprint(f"GL Entry Created for {doc.name}", alert=True, indicator="green")
-
-
 
 def cancel_gl_entries(doc, method):
     doc.ignore_linked_doctypes = ("GL Entry",)
@@ -138,8 +137,6 @@ def cancel_gl_entries(doc, method):
 
     if not is_new_version:
         logger.info(f"Old version of the expenses entry")
-        # If it's an older document, execute the older function logic
-
         paid_to_accounts = ", ".join([d.account_paid_to for d in doc.expenses])
 
         # Create GL entry for Account Paid From
@@ -192,8 +189,6 @@ def cancel_gl_entries(doc, method):
 
     else:
         logger.info(f"New expense entry version selected")
-        # New version logic - Proceed with the updated logic
-
         paid_to_accounts = ", ".join([d.account_paid_to for d in doc.expenses])
 
         # Update the remarks for cancellation with VAT details
@@ -222,7 +217,7 @@ def cancel_gl_entries(doc, method):
             "company": doc.company,
             "is_cancelled": 1,
             "to_rename": 1,
-            "remarks": cancel_remarks  # Use updated remarks with VAT info
+            "remarks": cancel_remarks
         }
         gl_entries.append(gl_entry)
 
@@ -251,29 +246,27 @@ def cancel_gl_entries(doc, method):
                 "company": doc.company,
                 "is_cancelled": 1,
                 "to_rename": 1,
-                "remarks": expense_cancel_remarks  # Include VAT info in each expense's remark for cancellation
+                "remarks": expense_cancel_remarks
             }
             gl_entries.append(gl_entry)
 
-            # 2. Fetch VAT account and cost center from the VAT template
+            # 2. Fetch VAT account and cost center
             if expense.vat_template:
                 vat_template = frappe.get_doc("Purchase Taxes and Charges Template", expense.vat_template)
                 if vat_template and vat_template.taxes:
                     vat_account = vat_template.taxes[0].account_head
-                    vat_cost_center = vat_template.taxes[0].cost_center
-
-                    # 3. GL entry for the VAT amount (Cancellation)
+                    vat_cost_center = expense.cost_center or doc.default_cost_center  # Use expense.cost_center or fallback to default_cost_center
                     vat_cancel_remarks = f"On Cancelled VAT Amount: {expense.vat_amount} | VAT Account: {vat_account} | Cost Center: {vat_cost_center}"
                     vat_gl_entry = {
                         "doctype": "GL Entry",
                         "posting_date": doc.posting_date,
-                        "account": vat_account,  # Use VAT account from the template
-                        "cost_center": vat_cost_center,  # Use VAT cost center from the template
+                        "account": vat_account,
+                        "cost_center": vat_cost_center,
                         "debit": 0,
-                        "credit": expense.vat_amount,  # Credit for VAT
+                        "credit": expense.vat_amount,
                         "debit_in_account_currency": 0,
                         "credit_in_account_currency": expense.vat_amount,
-                        "against": expense.account_paid_to,  # VAT is against the expense's account_paid_to
+                        "against": expense.account_paid_to,
                         "voucher_type": _("Expenses Entry"),
                         "voucher_no": doc.name,
                         "is_opening": "No",
@@ -281,7 +274,7 @@ def cancel_gl_entries(doc, method):
                         "fiscal_year": frappe.defaults.get_user_default("fiscal_year"),
                         "company": doc.company,
                         "is_cancelled": 1,
-                        "remarks": vat_cancel_remarks  # VAT cancellation remarks
+                        "remarks": vat_cancel_remarks
                     }
                     gl_entries.append(vat_gl_entry)
 
@@ -303,7 +296,7 @@ def cancel_gl_entries(doc, method):
         (now(), frappe.session.user, voucher_type, voucher_no),
     )
 
-
+# ... (other functions like delete_gl_entries, sync_missing_gl_entries, find_miscalculated_amounts remain unchanged) ...
 
 from frappe.utils import now
 

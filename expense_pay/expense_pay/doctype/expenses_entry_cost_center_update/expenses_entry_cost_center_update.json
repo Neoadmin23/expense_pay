@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-08-12 22:17:21.475744",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "from_date",
+  "to_date",
+  "update_status",
+  "log_details"
+ ],
+ "fields": [
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "From Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To Date",
+   "reqd": 1
+  },
+  {
+   "description": "Logs of processed and skipped entries",
+   "fieldname": "update_status",
+   "fieldtype": "Text",
+   "in_list_view": 1,
+   "label": "Update Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "log_details",
+   "fieldtype": "Table",
+   "label": "Update Log Details",
+   "options": "Update Log Detail",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-08-12 23:01:11.885411",
+ "modified_by": "erpsupport@irsaa.com",
+ "module": "Expense Pay",
+ "name": "Expenses Entry Cost Center Update",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

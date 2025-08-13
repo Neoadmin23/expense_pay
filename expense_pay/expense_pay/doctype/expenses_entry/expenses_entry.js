@@ -30,6 +30,31 @@ frappe.ui.form.on("Expenses Entry", {
                 1
             );
         }
+        if (frm.doc.docstatus === 1) {
+            frm.add_custom_button(__("Update Cost Center"), function() {
+                // Show confirmation dialog
+                frappe.confirm(
+                __(`Update the VAT GL entry cost centers for Expenses Entry ${frm.doc.name}?`),
+                function() {
+                    // Trigger background job with document name
+                    frappe.call({
+                    method: "expense_pay.update_single_entry.update_single_expense_entry_cost_centers",
+                    args: {
+                        expense_entry_name: frm.doc.name
+                    },
+                    callback: function(r) {
+                        if (r.message && r.message.job_id) {
+                        frappe.msgprint(__("Cost center update job enqueued. Check the Expenses Entry Cost Center Update document for progress."));
+                        }
+                    }
+                    });
+                },
+                function() {
+                    frappe.msgprint(__("Update cancelled."));
+                }
+                );
+            });
+        }
     },
     show_general_ledger: function (frm) {
         if (frm.doc.docstatus > 0) {
@@ -52,14 +77,40 @@ frappe.ui.form.on("Expenses Entry", {
     },
     onload: function (frm) {
         field_control(frm);
-        frm.set_query("account_paid_from", function () {
+        // Filter for account_paid_from
+        // frm.set_query("account_paid_from", function() {
+        //     return {
+        //         filters: [
+        //             ["Account", "is_group", "=", 0],
+        //             ["Account", "company", "=", frm.doc.company]
+        //         ],
+        //     };
+        // });
+        // Filter for default_cost_center
+        frm.set_query("default_cost_center", function() {
             return {
-                filters: [["Account", "is_group", "=", 0]],
+                filters: [
+                    ["Cost Center", "is_group", "=", 0],
+                    ["Cost Center", "company", "=", frm.doc.company]
+                ],
             };
         });
-        frm.set_query("account_paid_to", "expenses", function (doc, cdt, cdn) {
+        // Filter for account_paid_to in expenses child table
+        // frm.set_query("account_paid_to", "expenses", function(doc, cdt, cdn) {
+        //     return {
+        //         filters: [
+        //             ["Account", "is_group", "=", 0],
+        //             ["Account", "company", "=", frm.doc.company]
+        //         ],
+        //     };
+        // });
+        // Filter for cost_center in expenses child table
+        frm.set_query("cost_center", "expenses", function(doc, cdt, cdn) {
             return {
-                filters: [["Account", "is_group", "=", 0]],
+                filters: [
+                    ["Cost Center", "is_group", "=", 0],
+                    ["Cost Center", "company", "=", frm.doc.company]
+                ],
             };
         });
     },
@@ -487,11 +538,13 @@ frappe.ui.form.on("Expenses", {
         }
     },
     vat_template: function (frm, cdt, cdn) {
-        // Get the current child row data
         let row = locals[cdt][cdn];
-
+        console.log(`Row ${row.idx}: VAT Template selected - ${row.vat_template}, Default Cost Center: ${frm.doc.default_cost_center}`); // Log VAT template and default cost center
         if (row.vat_template) {
+            console.log(`Row ${row.idx}: Triggering calculate_vat for VAT Template - ${row.vat_template}`);
             calculate_vat(row, cdt, cdn);
+        } else {
+            console.log(`Row ${row.idx}: No VAT Template selected`);
         }
     },
 
