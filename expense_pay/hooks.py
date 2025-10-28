@@ -116,6 +116,10 @@ doc_events = {
         "on_cancel": "expense_pay.create_gl_entry.cancel_gl_entries",
         "on_trash": "expense_pay.create_gl_entry.delete_gl_entries"
     }
+    # "Sales Invoice": {
+    #     "before_insert": "expense_pay.utils.api.sales_invoice_set_draft_series",
+    #     "before_submit": "expense_pay.utils.api.sales_invoice_set_final_series",
+    # }
 }
 # Scheduled Tasks
 # ---------------
@@ -199,6 +203,7 @@ doc_events = {
 #		"doctype": "{doctype_4}"
 #	}
 # ]
+after_migrate = ["expense_pay.utils.sar_symbol.set_new_saudi_riyal_symbol"]
 
 # Authentication and authorization
 # --------------------------------
