@@ -52,15 +52,19 @@ frappe.ui.form.on("Expenses Entry", {
     },
     onload: function (frm) {
         field_control(frm);
+        const get_account_filters = () => {
+            const filters = [["Account", "is_group", "=", 0]];
+            if (frm.doc.company) {
+                filters.push(["Account", "company", "=", frm.doc.company]);
+            }
+            return { filters };
+        };
+
         frm.set_query("account_paid_from", function () {
-            return {
-                filters: [["Account", "is_group", "=", 0]],
-            };
+            return get_account_filters();
         });
-        frm.set_query("account_paid_to", "expenses", function (doc, cdt, cdn) {
-            return {
-                filters: [["Account", "is_group", "=", 0]],
-            };
+        frm.set_query("account_paid_to", "expenses", function () {
+            return get_account_filters();
         });
     },
     before_save: function (frm) {
@@ -263,10 +267,16 @@ frappe.ui.form.on("Expenses Entry", {
 
 frappe.ui.form.on("Expenses", {
     onload: function (frm) {
-        frm.set_query("account_paid_to", "expenses", function (doc, cdt, cdn) {
-            return {
-                filters: [["Account", "is_group", "=", 0]],
-            };
+        const get_account_filters = () => {
+            const filters = [["Account", "is_group", "=", 0]];
+            if (frm.doc.company) {
+                filters.push(["Account", "company", "=", frm.doc.company]);
+            }
+            return { filters };
+        };
+
+        frm.set_query("account_paid_to", "expenses", function () {
+            return get_account_filters();
         });
     },
     amount: function (frm, cdt, cdn) {
