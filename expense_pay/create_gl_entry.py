@@ -6,9 +6,57 @@ from erpnext.accounts.utils import _delete_gl_entries
 logger.set_log_level("DEBUG")
 logger = frappe.logger("expensepay", file_count=1, allow_site=True)
 
+
+def validate_account_is_ledger(account, doc_name, field_label="Account"):
+    """
+    Validate that the given account is a ledger account (not a group account).
+    Group accounts cannot be used in GL Entry transactions.
+    """
+    if not account:
+        return
+    
+    is_group = frappe.db.get_value("Account", account, "is_group")
+    if is_group:
+        frappe.throw(
+            _("{0} '{1}' is a Group Account. Group accounts cannot be used in transactions. "
+              "Please select a Ledger account for {2}.").format(field_label, account, doc_name),
+            title=_("Invalid Account")
+        )
+
+
+def validate_all_accounts(doc):
+    """
+    Validate all accounts used in the Expenses Entry to ensure they are ledger accounts.
+    """
+    # Validate the main account paid from
+    validate_account_is_ledger(doc.account_paid_from, doc.name, "Account Paid From")
+    
+    # Validate expense accounts
+    for expense in doc.expenses:
+        validate_account_is_ledger(
+            expense.account_paid_to, 
+            doc.name, 
+            f"Account Paid To (Row #{expense.idx})"
+        )
+        
+        # Validate VAT account if template is specified
+        if expense.vat_template:
+            vat_template = frappe.get_doc("Purchase Taxes and Charges Template", expense.vat_template)
+            if vat_template and vat_template.taxes:
+                vat_account = vat_template.taxes[0].account_head
+                validate_account_is_ledger(
+                    vat_account,
+                    doc.name,
+                    f"VAT Account from template '{expense.vat_template}' (Row #{expense.idx})"
+                )
+
+
 @frappe.whitelist()
 def create_gl_entries(doc, method):
     gl_entries = []
+    
+    # Validate all accounts before creating GL entries
+    validate_all_accounts(doc)
 
     # Create GL entry for Account Paid From
     paid_to_accounts = ", ".join([d.account_paid_to for d in doc.expenses])
@@ -129,6 +177,27 @@ def cancel_gl_entries(doc, method):
     if not existing_gl_entries:
         logger.info(f"No GL entries found for {doc.name}. Skipping cancellation process.")
         return
+    
+    # Try to validate accounts, but don't block cancellation if validation fails
+    # This allows cancelling documents that were created with group accounts (legacy data)
+    try:
+        validate_all_accounts(doc)
+        accounts_valid = True
+    except frappe.ValidationError as e:
+        logger.warning(f"Account validation failed for {doc.name} during cancellation: {e}. "
+                      f"Proceeding with cancellation by marking existing GL entries as cancelled only.")
+        accounts_valid = False
+        # If accounts are invalid, we'll skip creating reversal entries and just mark existing ones as cancelled
+        voucher_type = _("Expenses Entry")
+        voucher_no = doc.name
+        frappe.db.sql(
+            """UPDATE `tabGL Entry` SET is_cancelled = 1,
+            modified=%s, modified_by=%s
+            where voucher_type=%s and voucher_no=%s and is_cancelled = 0""",
+            (now(), frappe.session.user, voucher_type, voucher_no),
+        )
+        frappe.db.commit()
+        return  # Exit early - we've marked existing entries as cancelled
 
     # Check if the necessary fields exist to identify if it's a newer version
     is_new_version = all(
@@ -286,26 +355,39 @@ def cancel_gl_entries(doc, method):
                     gl_entries.append(vat_gl_entry)
 
     # Save and submit all GL Entries with cancellation flag
-    for gl_entry in gl_entries:
-        gle = frappe.new_doc("GL Entry")
-        gle.update(gl_entry)
-        gle.flags.ignore_permissions = 1
-        gle.flags.notify_update = False
-        gle.submit()
+    try:
+        for gl_entry in gl_entries:
+            gle = frappe.new_doc("GL Entry")
+            gle.update(gl_entry)
+            gle.flags.ignore_permissions = 1
+            gle.flags.notify_update = False
+            gle.submit()
 
-    # Set all original GL Entries as cancelled
-    voucher_type = gle.voucher_type
-    voucher_no = gle.voucher_no
-    frappe.db.sql(
-        """UPDATE `tabGL Entry` SET is_cancelled = 1,
-        modified=%s, modified_by=%s
-        where voucher_type=%s and voucher_no=%s and is_cancelled = 0""",
-        (now(), frappe.session.user, voucher_type, voucher_no),
-    )
+        # Set all original GL Entries as cancelled
+        voucher_type = gle.voucher_type
+        voucher_no = gle.voucher_no
+        frappe.db.sql(
+            """UPDATE `tabGL Entry` SET is_cancelled = 1,
+            modified=%s, modified_by=%s
+            where voucher_type=%s and voucher_no=%s and is_cancelled = 0""",
+            (now(), frappe.session.user, voucher_type, voucher_no),
+        )
+        frappe.db.commit()
+    except Exception as e:
+        # If creating reversal entries fails (e.g., due to group accounts),
+        # just mark existing GL entries as cancelled without creating new ones
+        logger.warning(f"Failed to create reversal GL entries for {doc.name}: {e}. "
+                      f"Marking existing GL entries as cancelled only.")
+        voucher_type = _("Expenses Entry")
+        voucher_no = doc.name
+        frappe.db.sql(
+            """UPDATE `tabGL Entry` SET is_cancelled = 1,
+            modified=%s, modified_by=%s
+            where voucher_type=%s and voucher_no=%s and is_cancelled = 0""",
+            (now(), frappe.session.user, voucher_type, voucher_no),
+        )
+        frappe.db.commit()
 
-
-
-from frappe.utils import now
 
 def delete_gl_entries(doc, method):
     """
