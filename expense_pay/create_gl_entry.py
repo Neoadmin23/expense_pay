@@ -6,6 +6,8 @@ from erpnext.accounts.utils import _delete_gl_entries
 logger.set_log_level("DEBUG")
 logger = frappe.logger("expensepay", file_count=1, allow_site=True)
 
+VOUCHER_TYPE_EXPENSES_ENTRY = "Expenses Entry"
+
 
 def validate_account_is_ledger(account, doc_name, field_label="Account"):
     """
@@ -49,6 +51,33 @@ def validate_all_accounts(doc):
                     doc.name,
                     f"VAT Account from template '{expense.vat_template}' (Row #{expense.idx})"
                 )
+
+
+def _voucher_has_group_account_gl_entries(voucher_no: str) -> bool:
+    """Return True if any *existing* GL Entry for this voucher uses a group account."""
+    gl_accounts = frappe.get_all(
+        "GL Entry",
+        filters={"voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY, "voucher_no": voucher_no},
+        fields=["account"],
+    )
+    accounts = sorted({d.account for d in gl_accounts if d.get("account")})
+    if not accounts:
+        return False
+
+    group_accounts = frappe.get_all(
+        "Account",
+        filters={"name": ["in", accounts], "is_group": 1},
+        fields=["name"],
+    )
+    return bool(group_accounts)
+
+
+def _delete_voucher_gl_entries(voucher_no: str, reason: str | None = None) -> None:
+    """Delete GL Entries for this voucher (used to clean up invalid historical data)."""
+    if reason:
+        logger.warning(f"Deleting GL entries for {voucher_no}: {reason}")
+    _delete_gl_entries(VOUCHER_TYPE_EXPENSES_ENTRY, voucher_no)
+    frappe.db.commit()
 
 
 @frappe.whitelist()
@@ -169,7 +198,7 @@ def cancel_gl_entries(doc, method):
     # Check if GL Entries exist for the current document
     existing_gl_entries = frappe.get_all(
         "GL Entry",
-        filters={"voucher_type": _("Expenses Entry"), "voucher_no": doc.name, "is_cancelled": 0},
+        filters={"voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY, "voucher_no": doc.name, "is_cancelled": 0},
         fields=["name"]
     )
 
@@ -177,20 +206,36 @@ def cancel_gl_entries(doc, method):
     if not existing_gl_entries:
         logger.info(f"No GL entries found for {doc.name}. Skipping cancellation process.")
         return
+
+    # If the *existing* GL Entries already contain group accounts (invalid historical data),
+    # do not attempt to create reversal entries. Just delete the invalid GL Entries and exit.
+    if _voucher_has_group_account_gl_entries(doc.name):
+        _delete_voucher_gl_entries(
+            doc.name,
+            reason="Existing GL Entries use group accounts; deleting to keep ledger clean during cancellation.",
+        )
+        frappe.msgprint(
+            _("Cancelled Expenses Entry {0}. Invalid GL entries (with group accounts) have been deleted to keep the ledger clean.").format(
+                doc.name
+            ),
+            alert=True,
+            indicator="orange",
+        )
+        return
     
     # Try to validate accounts, but don't block cancellation if validation fails
     # This allows cancelling documents that were created with group accounts (legacy data)
     try:
         validate_all_accounts(doc)
         accounts_valid = True
-    except frappe.ValidationError as e:
+    except Exception as e:
         logger.warning(f"Account validation failed for {doc.name} during cancellation: {e}. "
                       f"Proceeding with cancellation by deleting invalid GL entries (group accounts detected).")
         accounts_valid = False
         # If accounts are invalid (group accounts), delete the GL entries to keep ledger clean
         # These entries shouldn't exist in the first place since group accounts can't be used in transactions
         try:
-            _delete_gl_entries(_("Expenses Entry"), doc.name)
+            _delete_voucher_gl_entries(doc.name, reason="Account validation failed; deleting GL Entries.")
             logger.info(f"Successfully deleted invalid GL entries for {doc.name} (group accounts detected)")
             frappe.msgprint(
                 _("Cancelled Expenses Entry {0}. Invalid GL entries (with group accounts) have been deleted to keep the ledger clean.").format(doc.name),
@@ -200,7 +245,7 @@ def cancel_gl_entries(doc, method):
         except Exception as delete_error:
             logger.error(f"Error deleting GL entries for {doc.name}: {delete_error}")
             # Fallback: mark as cancelled if deletion fails
-            voucher_type = _("Expenses Entry")
+            voucher_type = VOUCHER_TYPE_EXPENSES_ENTRY
             voucher_no = doc.name
             frappe.db.sql(
                 """UPDATE `tabGL Entry` SET is_cancelled = 1,
@@ -401,7 +446,7 @@ def cancel_gl_entries(doc, method):
             logger.warning(f"Failed to create reversal GL entries for {doc.name} due to group accounts: {e}. "
                           f"Deleting invalid GL entries to keep ledger clean.")
             try:
-                _delete_gl_entries(_("Expenses Entry"), doc.name)
+                _delete_voucher_gl_entries(doc.name, reason="Reversal creation failed due to group accounts.")
                 logger.info(f"Successfully deleted invalid GL entries for {doc.name} (group accounts detected)")
                 frappe.msgprint(
                     _("Cancelled Expenses Entry {0}. Invalid GL entries (with group accounts) have been deleted to keep the ledger clean.").format(doc.name),
@@ -411,7 +456,7 @@ def cancel_gl_entries(doc, method):
             except Exception as delete_error:
                 logger.error(f"Error deleting GL entries for {doc.name}: {delete_error}")
                 # Fallback: mark as cancelled if deletion fails
-                voucher_type = _("Expenses Entry")
+                voucher_type = VOUCHER_TYPE_EXPENSES_ENTRY
                 voucher_no = doc.name
                 frappe.db.sql(
                     """UPDATE `tabGL Entry` SET is_cancelled = 1,
@@ -429,7 +474,7 @@ def cancel_gl_entries(doc, method):
             # For other errors, mark as cancelled (standard behavior)
             logger.warning(f"Failed to create reversal GL entries for {doc.name}: {e}. "
                           f"Marking existing GL entries as cancelled only.")
-            voucher_type = _("Expenses Entry")
+            voucher_type = VOUCHER_TYPE_EXPENSES_ENTRY
             voucher_no = doc.name
             frappe.db.sql(
                 """UPDATE `tabGL Entry` SET is_cancelled = 1,
