@@ -423,6 +423,9 @@ def cancel_gl_entries(doc, method):
             gle.update(gl_entry)
             gle.flags.ignore_permissions = 1
             gle.flags.notify_update = False
+            # Note: We let validation run normally to catch genuine errors
+            # If validation fails due to legacy data issues (group accounts, company mismatch),
+            # we handle it in the except block below
             gle.submit()
 
         # Set all original GL Entries as cancelled
@@ -436,20 +439,22 @@ def cancel_gl_entries(doc, method):
         )
         frappe.db.commit()
     except Exception as e:
-        # If creating reversal entries fails (e.g., due to group accounts),
-        # check if it's a validation error about group accounts and delete entries if so
+        # If creating reversal entries fails (e.g., due to group accounts or company mismatch),
+        # check if it's a validation error and delete entries if so
         error_message = str(e)
         is_group_account_error = "Group Account" in error_message or "group accounts cannot be used" in error_message.lower()
+        is_company_mismatch_error = "does not belong to Company" in error_message
         
-        if is_group_account_error:
-            # Delete invalid GL entries (group accounts) to keep ledger clean
-            logger.warning(f"Failed to create reversal GL entries for {doc.name} due to group accounts: {e}. "
+        if is_group_account_error or is_company_mismatch_error:
+            # Delete invalid GL entries (group accounts or company mismatch) to keep ledger clean
+            error_type = "group accounts" if is_group_account_error else "company mismatch"
+            logger.warning(f"Failed to create reversal GL entries for {doc.name} due to {error_type}: {e}. "
                           f"Deleting invalid GL entries to keep ledger clean.")
             try:
-                _delete_voucher_gl_entries(doc.name, reason="Reversal creation failed due to group accounts.")
-                logger.info(f"Successfully deleted invalid GL entries for {doc.name} (group accounts detected)")
+                _delete_voucher_gl_entries(doc.name, reason=f"Reversal creation failed due to {error_type}.")
+                logger.info(f"Successfully deleted invalid GL entries for {doc.name} ({error_type} detected)")
                 frappe.msgprint(
-                    _("Cancelled Expenses Entry {0}. Invalid GL entries (with group accounts) have been deleted to keep the ledger clean.").format(doc.name),
+                    _("Cancelled Expenses Entry {0}. Invalid GL entries have been deleted to keep the ledger clean.").format(doc.name),
                     alert=True,
                     indicator="orange"
                 )
