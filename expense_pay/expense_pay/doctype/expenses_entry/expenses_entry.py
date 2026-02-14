@@ -8,16 +8,30 @@ from frappe.model.document import Document
 class ExpensesEntry(Document):
 	def validate(self):
 		"""Validate accounts before saving/submitting"""
-		# Validate that all accounts are ledger accounts (not group accounts)
-		# This prevents the error from happening deep in GL Entry creation
+		# 1. Credit account (account_paid_from) is mandatory
+		if not self.account_paid_from:
+			frappe.throw(
+				_("Account Paid From (Credit account) is mandatory."),
+				title=_("Required Field Missing")
+			)
+
+		# 2. Debit accounts (account_paid_to per row) are mandatory
+		for expense in self.expenses:
+			if not expense.account_paid_to:
+				frappe.throw(
+					_("Account Paid To (Debit account) is mandatory in Row #{0}.").format(expense.idx),
+					title=_("Required Field Missing")
+				)
+
+		# 3. Validate that all accounts are ledger accounts (not group accounts)
 		self._validate_account_is_ledger(self.account_paid_from, "Account Paid From")
-		
+
 		for expense in self.expenses:
 			self._validate_account_is_ledger(
-				expense.account_paid_to, 
+				expense.account_paid_to,
 				f"Account Paid To (Row #{expense.idx})"
 			)
-			
+
 			# Validate VAT account if template is specified
 			if expense.vat_template:
 				try:
