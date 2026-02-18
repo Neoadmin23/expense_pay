@@ -53,6 +53,19 @@ def validate_all_accounts(doc):
                 )
 
 
+def _doc_has_invalid_account_data(doc) -> bool:
+    """
+    Return True if the doc has missing account data (blank account_paid_from or any blank account_paid_to).
+    Such docs cannot have reversal entries created - we must delete existing GL entries instead.
+    """
+    if not doc.account_paid_from:
+        return True
+    for expense in (doc.expenses or []):
+        if not expense.account_paid_to:
+            return True
+    return False
+
+
 def _voucher_has_group_account_gl_entries(voucher_no: str) -> bool:
     """Return True if any *existing* GL Entry for this voucher uses a group account."""
     gl_accounts = frappe.get_all(
@@ -222,7 +235,23 @@ def cancel_gl_entries(doc, method):
             indicator="orange",
         )
         return
-    
+
+    # If doc has missing account data (blank account_paid_from or account_paid_to in expenses),
+    # do not attempt to create reversal entries. Just delete existing GL entries and allow cancel.
+    if _doc_has_invalid_account_data(doc):
+        _delete_voucher_gl_entries(
+            doc.name,
+            reason="Document has missing account details; deleting GL entries to allow cancellation.",
+        )
+        frappe.msgprint(
+            _("Cancelled Expenses Entry {0}. GL entries deleted (document had missing account details).").format(
+                doc.name
+            ),
+            alert=True,
+            indicator="orange",
+        )
+        return
+
     # Try to validate accounts, but don't block cancellation if validation fails
     # This allows cancelling documents that were created with group accounts (legacy data)
     try:
@@ -439,15 +468,24 @@ def cancel_gl_entries(doc, method):
         )
         frappe.db.commit()
     except Exception as e:
-        # If creating reversal entries fails (e.g., due to group accounts or company mismatch),
-        # check if it's a validation error and delete entries if so
+        # If creating reversal entries fails (e.g., due to group accounts, company mismatch,
+        # or missing mandatory account fields), delete entries and allow cancel to succeed.
         error_message = str(e)
         is_group_account_error = "Group Account" in error_message or "group accounts cannot be used" in error_message.lower()
         is_company_mismatch_error = "does not belong to Company" in error_message
-        
-        if is_group_account_error or is_company_mismatch_error:
-            # Delete invalid GL entries (group accounts or company mismatch) to keep ledger clean
-            error_type = "group accounts" if is_group_account_error else "company mismatch"
+        is_mandatory_error = (
+            "mandatory" in error_message.lower() or "required" in error_message.lower()
+            or "cannot be empty" in error_message.lower() or "Required Field" in error_message
+        )
+
+        if is_group_account_error or is_company_mismatch_error or is_mandatory_error:
+            # Delete invalid GL entries to keep ledger clean and allow cancel to succeed
+            if is_group_account_error:
+                error_type = "group accounts"
+            elif is_company_mismatch_error:
+                error_type = "company mismatch"
+            else:
+                error_type = "missing mandatory account fields"
             logger.warning(f"Failed to create reversal GL entries for {doc.name} due to {error_type}: {e}. "
                           f"Deleting invalid GL entries to keep ledger clean.")
             try:
@@ -493,16 +531,22 @@ def cancel_gl_entries(doc, method):
 def delete_gl_entries(doc, method):
     """
     Cancels and deletes GL Entries linked to the Expenses Entry before deleting the doc.
+    Allows deletion of docs with invalid/missing account data (legacy entries).
     """
+    doc.ignore_linked_doctypes = ("GL Entry",)
+
     logger.info(f"Deleting GL Entries related to Expenses Entry {doc.name}")
-    # Find all related GL Entries for this voucher type and number
-    _delete_gl_entries("Expenses Entry", doc.name)
-    
-    doc.ignore_linked_doctypes = ("Gl Entry")
-    
-    logger.info("Ignoring the gl entries")
-    # Optionally log or notify about the deletion
-    frappe.msgprint(_("Cancelled and deleted GL Entries related to Expenses Entry {0}.").format(doc.name), alert=True)
+    try:
+        _delete_gl_entries(VOUCHER_TYPE_EXPENSES_ENTRY, doc.name)
+        frappe.db.commit()
+        frappe.msgprint(_("Cancelled and deleted GL Entries related to Expenses Entry {0}.").format(doc.name), alert=True)
+    except Exception as e:
+        logger.warning(f"Error deleting GL entries for Expenses Entry {doc.name}: {e}. Proceeding with doc deletion.")
+        frappe.msgprint(
+            _("Expenses Entry {0}: GL entries could not be fully cleaned up, but the document will be deleted.").format(doc.name),
+            alert=True,
+            indicator="orange",
+        )
 
 
 @frappe.whitelist()
