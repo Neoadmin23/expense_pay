@@ -73,21 +73,23 @@ frappe.ui.form.on("Expenses Entry", {
 
     // validate event: Perform all validation checks
     validate: function (frm) {
-        // Round paid amount and total debit for comparison
-        let rounded_paid_amount = parseFloat(frm.doc.paid_amount.toFixed(2));
-        let rounded_total_debit = parseFloat(frm.doc.total_debit.toFixed(2));
+        const validation_errors = [];
+        const paidAmountPrecision = precision("paid_amount", frm.doc) || 2;
+        // Precision-aware rounding for currency checks
+        let rounded_paid_amount = flt(frm.doc.paid_amount || 0, paidAmountPrecision);
+        let rounded_total_debit = flt(frm.doc.total_debit || 0, paidAmountPrecision);
 
         if (rounded_paid_amount <= 0) {
-            frappe.throw("Paid Amount cannot be zero");
+            validation_errors.push("Paid Amount must be greater than zero.");
         }
 
         if (rounded_total_debit <= 0) {
-            frappe.throw("Total Debit cannot be zero");
+            validation_errors.push("Total Debit must be greater than zero.");
         }
 
         if (rounded_paid_amount !== rounded_total_debit) {
-            frappe.throw(
-                "Total Debit amount must be equal to or less than the Paid Amount"
+            validation_errors.push(
+                `Paid Amount (${rounded_paid_amount}) must equal Total Debit (${rounded_total_debit}).`
             );
         }
 
@@ -95,33 +97,36 @@ frappe.ui.form.on("Expenses Entry", {
         let invalid_rows = [];
 
         frm.doc.expenses.forEach((expense) => {
-            let calculated_total;
-            if (expense.vat_amount > 0) {
-                calculated_total = parseFloat(
-                    (expense.amount_without_vat + expense.vat_amount).toFixed(2)
-                );
-            } else {
-                calculated_total = parseFloat(
-                    expense.amount_without_vat.toFixed(2)
-                );
-            }
-            let rounded_amount = parseFloat(expense.amount.toFixed(2));
+            const amountPrecision = precision("amount", expense) || 2;
+            const amountWithoutVatPrecision =
+                precision("amount_without_vat", expense) || amountPrecision;
+            const vatPrecision = precision("vat_amount", expense) || amountPrecision;
+            const rowPrecision = Math.max(
+                amountPrecision,
+                amountWithoutVatPrecision,
+                vatPrecision
+            );
+
+            const amountWithoutVat = flt(expense.amount_without_vat || 0, rowPrecision);
+            const vatAmount = flt(expense.vat_amount || 0, rowPrecision);
+            const calculated_total = flt(amountWithoutVat + vatAmount, rowPrecision);
+            const rounded_amount = flt(expense.amount || 0, rowPrecision);
 
             if (rounded_amount !== calculated_total) {
                 console.log("Rounded Amount : " + rounded_amount);
                 console.log("Calculated Total : ", calculated_total);
                 invalid_rows.push(
-                    `Row #${expense.idx}: Amount (${rounded_amount}) does not equal Amount Without VAT (${expense.amount_without_vat}) + VAT Amount (${expense.vat_amount})`
+                    `Row #${expense.idx}: Amount (${rounded_amount}) does not equal Amount Without VAT (${amountWithoutVat}) + VAT Amount (${vatAmount})`
                 );
             }
         });
 
         if (invalid_rows.length > 0) {
-            frappe.throw(
-                `The following rows have miscalculated amounts:<br><br>${invalid_rows.join(
-                    "<br>"
-                )}`
-            );
+            validation_errors.push(...invalid_rows);
+        }
+
+        if (validation_errors.length > 0) {
+            frappe.throw(`Please correct the following:<br><br>${validation_errors.join("<br>")}`);
         }
     },
 

@@ -121,7 +121,7 @@ def create_gl_entries(doc, method):
         "debit_in_account_currency": 0,
         "credit_in_account_currency": doc.paid_amount,
         "against": paid_to_accounts,
-        "voucher_type": _("Expenses Entry"),
+        "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
         "voucher_no": doc.name,
         "is_opening": "No",
         "is_advance": "No",
@@ -147,7 +147,7 @@ def create_gl_entries(doc, method):
             "debit_in_account_currency": expense.amount_without_vat,
             "credit_in_account_currency": 0,
             "against": doc.account_paid_from,
-            "voucher_type": _("Expenses Entry"),
+            "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
             "voucher_no": doc.name,
             "is_opening": "No",
             "is_advance": "No",
@@ -174,7 +174,7 @@ def create_gl_entries(doc, method):
                     "debit_in_account_currency": expense.vat_amount,
                     "credit_in_account_currency": 0,
                     "against": expense.account_paid_to,
-                    "voucher_type": _("Expenses Entry"),
+                    "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
                     "voucher_no": doc.name,
                     "is_opening": "No",
                     "is_advance": "No",
@@ -184,19 +184,24 @@ def create_gl_entries(doc, method):
                 }
                 gl_entries.append(vat_gl_entry)
 
-    # Save and submit all GL Entries
-    for gl_entry in gl_entries:
-        try:
+    # Save and submit all GL Entries atomically
+    try:
+        for gl_entry in gl_entries:
             gle = frappe.new_doc("GL Entry")
             gle.update(gl_entry)
             gle.flags.ignore_permissions = 1
             gle.flags.notify_update = False
             gle.submit()
-            logger.info(f"GL Entry successfully submitted for Doc: {doc.name}")
-        except Exception as e:
-            logger.error(f"Error submitting GL Entry for Doc {doc.name}: {e}")
-            frappe.msgprint(f"Error submitting GL Entry for {doc.name}: {str(e)}", alert=True, indicator="red")
-            return  # Stop the function if an error occurs
+        logger.info(f"GL Entry successfully submitted for Doc: {doc.name}")
+    except Exception as e:
+        frappe.db.rollback()
+        logger.error(f"Error submitting GL Entry for Doc {doc.name}: {frappe.get_traceback()}")
+        frappe.throw(
+            _("Failed to create GL Entries for Expenses Entry {0}. No ledger entries were posted. Error: {1}").format(
+                doc.name, str(e)
+            ),
+            title=_("GL Posting Failed")
+        )
 
     logger.info(f"GL Entry created for Doc: {doc.name} using create_gl_entries")
     frappe.msgprint(f"GL Entry Created for {doc.name}", alert=True, indicator="green")
@@ -313,7 +318,7 @@ def cancel_gl_entries(doc, method):
             "debit_in_account_currency": doc.paid_amount,
             "credit_in_account_currency": 0,
             "against": paid_to_accounts,
-            "voucher_type": _("Expenses Entry"),
+            "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
             "voucher_no": doc.name,
             "is_opening": "No",
             "is_advance": "No",
@@ -338,7 +343,7 @@ def cancel_gl_entries(doc, method):
                 "debit_in_account_currency": 0,
                 "credit_in_account_currency": expense.amount,
                 "against": doc.account_paid_from,
-                "voucher_type": _("Expenses Entry"),
+                "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
                 "voucher_no": doc.name,
                 "is_opening": "No",
                 "is_advance": "No",
@@ -374,7 +379,7 @@ def cancel_gl_entries(doc, method):
             "debit_in_account_currency": doc.paid_amount,
             "credit_in_account_currency": 0,
             "against": paid_to_accounts,
-            "voucher_type": _("Expenses Entry"),
+            "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
             "voucher_no": doc.name,
             "is_opening": "No",
             "is_advance": "No",
@@ -403,7 +408,7 @@ def cancel_gl_entries(doc, method):
                 "debit_in_account_currency": 0,
                 "credit_in_account_currency": expense.amount_without_vat,
                 "against": doc.account_paid_from,
-                "voucher_type": _("Expenses Entry"),
+                "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
                 "voucher_no": doc.name,
                 "is_opening": "No",
                 "is_advance": "No",
@@ -434,7 +439,7 @@ def cancel_gl_entries(doc, method):
                         "debit_in_account_currency": 0,
                         "credit_in_account_currency": expense.vat_amount,
                         "against": expense.account_paid_to,  # VAT is against the expense's account_paid_to
-                        "voucher_type": _("Expenses Entry"),
+                        "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
                         "voucher_no": doc.name,
                         "is_opening": "No",
                         "is_advance": "No",
