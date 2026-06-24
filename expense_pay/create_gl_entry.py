@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import  now, logger
+from frappe.utils import flt, now, logger
 from erpnext.accounts.utils import _delete_gl_entries
 
 logger.set_log_level("DEBUG")
@@ -93,10 +93,16 @@ def _delete_voucher_gl_entries(voucher_no: str, reason: str | None = None) -> No
     frappe.db.commit()
 
 
+def _get_amount_precision(doc):
+	return doc.precision("paid_amount") or 2
+
+
 @frappe.whitelist()
 def create_gl_entries(doc, method):
     gl_entries = []
-    
+    amt_precision = _get_amount_precision(doc)
+    paid_amount = flt(doc.paid_amount, amt_precision)
+
     # Validate all accounts before creating GL entries
     validate_all_accounts(doc)
 
@@ -117,9 +123,9 @@ def create_gl_entries(doc, method):
         "account": doc.account_paid_from,
         "cost_center": doc.default_cost_center or "",
         "debit": 0,
-        "credit": doc.paid_amount,
+        "credit": paid_amount,
         "debit_in_account_currency": 0,
-        "credit_in_account_currency": doc.paid_amount,
+        "credit_in_account_currency": paid_amount,
         "against": paid_to_accounts,
         "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
         "voucher_no": doc.name,
@@ -133,8 +139,10 @@ def create_gl_entries(doc, method):
 
     # Create GL entries for each expense and VAT
     for expense in doc.expenses:
-        expense_remarks = f"{expense.remarks or ''} | Amount without VAT: {expense.amount_without_vat} | VAT Amount: {expense.vat_amount} ({expense.vat_template})"
-        logger.info(f"Amount without vat : {expense.amount_without_vat}\n")
+        amount_without_vat = flt(expense.amount_without_vat, amt_precision)
+        vat_amount = flt(expense.vat_amount, amt_precision)
+        expense_remarks = f"{expense.remarks or ''} | Amount without VAT: {amount_without_vat} | VAT Amount: {vat_amount} ({expense.vat_template})"
+        logger.info(f"Amount without vat : {amount_without_vat}\n")
         # GL entry for the amount without VAT
         gl_entry = {
             "doctype": "GL Entry",
@@ -142,9 +150,9 @@ def create_gl_entries(doc, method):
             "account": expense.account_paid_to,
             "cost_center": expense.cost_center or doc.default_cost_center,
             "project": expense.project or "",
-            "debit": expense.amount_without_vat,
+            "debit": amount_without_vat,
             "credit": 0,
-            "debit_in_account_currency": expense.amount_without_vat,
+            "debit_in_account_currency": amount_without_vat,
             "credit_in_account_currency": 0,
             "against": doc.account_paid_from,
             "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
@@ -158,7 +166,7 @@ def create_gl_entries(doc, method):
         gl_entries.append(gl_entry)
 
         # GL entry for VAT amount
-        if expense.vat_template and (expense.vat_amount > 0):
+        if expense.vat_template and (vat_amount > 0):
             vat_template = frappe.get_doc("Purchase Taxes and Charges Template", expense.vat_template)
             if vat_template and vat_template.taxes:
                 vat_account = vat_template.taxes[0].account_head
@@ -169,9 +177,9 @@ def create_gl_entries(doc, method):
                     "posting_date": doc.posting_date,
                     "account": vat_account,
                     "cost_center": vat_cost_center,
-                    "debit": expense.vat_amount,
+                    "debit": vat_amount,
                     "credit": 0,
-                    "debit_in_account_currency": expense.vat_amount,
+                    "debit_in_account_currency": vat_amount,
                     "credit_in_account_currency": 0,
                     "against": expense.account_paid_to,
                     "voucher_type": VOUCHER_TYPE_EXPENSES_ENTRY,
@@ -180,7 +188,7 @@ def create_gl_entries(doc, method):
                     "is_advance": "No",
                     "fiscal_year": frappe.defaults.get_user_default("fiscal_year"),
                     "company": doc.company,
-                    "remarks": f"VAT Amount: {expense.vat_amount} | VAT Account: {vat_account} | Cost Center: {vat_cost_center}"
+                    "remarks": f"VAT Amount: {vat_amount} | VAT Account: {vat_account} | Cost Center: {vat_cost_center}"
                 }
                 gl_entries.append(vat_gl_entry)
 

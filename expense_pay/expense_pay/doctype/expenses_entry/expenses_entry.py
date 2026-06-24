@@ -6,7 +6,52 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+
+def _get_vat_tax_rate(vat_template):
+	taxes = frappe.get_all(
+		"Purchase Taxes and Charges",
+		filters={"parent": vat_template, "parenttype": "Purchase Taxes and Charges Template"},
+		fields=["rate"],
+		limit=1,
+	)
+	return taxes[0].rate if taxes else None
+
+
 class ExpensesEntry(Document):
+	def before_save(self):
+		self._normalize_expense_amounts()
+
+	def _normalize_expense_amounts(self):
+		"""Round child-row amounts and recompute VAT so GL debits match paid_amount credit."""
+		paid_amount_precision = self.precision("paid_amount") or 2
+		total_debit = 0.0
+
+		for expense in self.expenses:
+			row_precision = max(
+				expense.precision("amount") or paid_amount_precision,
+				expense.precision("amount_without_vat") or paid_amount_precision,
+				expense.precision("vat_amount") or paid_amount_precision,
+			)
+			expense.amount_without_vat = flt(expense.amount_without_vat or 0, row_precision)
+
+			if expense.vat_template:
+				tax_rate = _get_vat_tax_rate(expense.vat_template)
+				if tax_rate is not None:
+					expense.vat_amount = flt(
+						expense.amount_without_vat * tax_rate / 100, row_precision
+					)
+				else:
+					expense.vat_amount = flt(expense.vat_amount or 0, row_precision)
+			else:
+				expense.vat_amount = flt(expense.vat_amount or 0, row_precision)
+
+			expense.amount = flt(expense.amount_without_vat + expense.vat_amount, row_precision)
+			total_debit += expense.amount
+
+		self.total_debit = flt(total_debit, paid_amount_precision)
+		if not self.multi_currency:
+			self.paid_amount = self.total_debit
+
 	def validate(self):
 		"""Validate entries and collect all errors before throwing once."""
 		errors = []

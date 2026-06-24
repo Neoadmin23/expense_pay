@@ -544,18 +544,21 @@ function calculate_vat(row, cdt, cdn) {
                 if (r.message) {
                     // Assuming the rate is in the first row of the taxes child table
                     let tax_rate = r.message.taxes[0].rate;
+                    const rowPrecision = Math.max(
+                        precision("vat_amount", row) || 2,
+                        precision("amount_without_vat", row) || 2,
+                        precision("amount", row) || 2
+                    );
+                    const amountWithoutVat = flt(row.amount_without_vat || 0, rowPrecision);
 
-                    // Update VAT Amount based on Amount Without VAT
-                    let vat_amount = (row.amount_without_vat * tax_rate) / 100;
+                    // Update VAT Amount based on Amount Without VAT (rounded to currency precision)
+                    let vat_amount = flt((amountWithoutVat * tax_rate) / 100, rowPrecision);
+                    const amount = flt(amountWithoutVat + vat_amount, rowPrecision);
 
                     // Update the child table fields
+                    frappe.model.set_value(cdt, cdn, "amount_without_vat", amountWithoutVat);
                     frappe.model.set_value(cdt, cdn, "vat_amount", vat_amount);
-                    frappe.model.set_value(
-                        cdt,
-                        cdn,
-                        "amount",
-                        row.amount_without_vat + vat_amount
-                    );
+                    frappe.model.set_value(cdt, cdn, "amount", amount);
                     update_total_debit(frm);
                 }
             },
@@ -670,19 +673,26 @@ function update_exchange_rate(frm) {
 function update_total_debit(frm) {
     console.log("Total Debit Amount called");
 
-    // Initialize total_debit_amount to 0
+    const paidAmountPrecision = precision("paid_amount", frm.doc) || 2;
     let total_debit_amount = 0;
 
-    frm.doc.expenses.forEach((expense, index) => {
-        if (expense.vat_amount) {
-            total_debit_amount +=
-                expense.amount_without_vat + expense.vat_amount;
-        } else {
-            total_debit_amount += expense.amount_without_vat;
-        }
+    frm.doc.expenses.forEach((expense) => {
+        const rowPrecision = Math.max(
+            precision("amount", expense) || paidAmountPrecision,
+            precision("amount_without_vat", expense) || paidAmountPrecision,
+            precision("vat_amount", expense) || paidAmountPrecision
+        );
+        const amountWithoutVat = flt(expense.amount_without_vat || 0, rowPrecision);
+        const vatAmount = flt(expense.vat_amount || 0, rowPrecision);
+        total_debit_amount += flt(amountWithoutVat + vatAmount, rowPrecision);
     });
 
+    total_debit_amount = flt(total_debit_amount, paidAmountPrecision);
     frm.set_value("total_debit", total_debit_amount);
+
+    if (!frm.doc.multi_currency) {
+        frm.set_value("paid_amount", total_debit_amount);
+    }
 
     if (frm.doc.multi_currency) {
         frm.set_value(

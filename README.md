@@ -1,6 +1,10 @@
 ## Expense Pay
 
+**Current version:** 0.2.3
+
 Custom Frappe / ERPNext app that introduces an **`Expenses Entry`** document to record a single “payment” that is split across **multiple expense lines**, and automatically generates the corresponding **`GL Entry`** rows on submit (including optional **VAT split**).
+
+**Documentation:** [Introduction](docs/introduction.md) · [Changelog](docs/CHANGELOG.md)
 
 This README documents:
 - **What features the app provides**
@@ -130,9 +134,8 @@ On the form (`expense_pay/expense_pay/doctype/expenses_entry/expenses_entry.js`)
 - **Account selection guards**:
   - `account_paid_from` and row `account_paid_to` are filtered to `Account.is_group = 0` (ledger accounts only).
 - **Totals**:
-  - `total_debit` is computed as the sum of each row’s:
-    - `amount_without_vat + vat_amount` (if VAT exists)
-    - otherwise `amount_without_vat`
+  - `total_debit` is computed as the sum of each row’s rounded `amount_without_vat + vat_amount`.
+  - On save, server-side `before_save` normalizes row amounts to currency precision and recomputes VAT from the template rate.
 - **Validation before submit**:
   - `paid_amount` must be > 0
   - `total_debit` must be > 0
